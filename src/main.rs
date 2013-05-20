@@ -1,11 +1,14 @@
-use core::libc::{c_void, c_int, c_char, c_ulong, c_uint};
+use core::libc::{c_void, c_int, c_char, c_ulong, c_uint, c_float};
 use core::libc::funcs::posix88::unistd::{sleep};
 use core::hashmap::linear;
 
-type JackClient   = c_void;
-type JackPort     = c_void;
-type c_str        = *c_char;
-type c_str_array  = *c_str;
+type JackClient          = c_void;
+type JackPort            = c_void;
+type c_str               = *c_char;
+type c_str_array         = *c_str;
+type JackProcessCallback = *u8;
+type JackNFrames         = u32;
+type JackDefaultAudioSample = c_float;  
 
 enum JackStatus {
   JackFailure = 0x01,
@@ -44,8 +47,13 @@ extern {
   fn jack_get_ports(client            : *JackClient, port_name_pattern : c_str, 
                     type_name_pattern : c_str,      flags              : c_ulong) -> c_str_array;
 
+	fn jack_set_process_callback (client : *JackClient,  process_callback : JackProcessCallback, 
+                                arg    : *c_void)   -> c_int;
+
+  fn jack_port_get_buffer (port : *JackPort, frames : JackNFrames) -> *JackDefaultAudioSample;
 
 }
+
 
 unsafe fn from_c_str_array(str_array: c_str_array, results : & mut ~[~str]) -> () {
   let mut curr_ptr = str_array;
@@ -58,13 +66,12 @@ unsafe fn from_c_str_array(str_array: c_str_array, results : & mut ~[~str]) -> (
 }
 
 
-fn register_output_port(client : * JackPort) -> () {
+fn register_output_port(client : * JackPort) -> (*JackPort) {
   unsafe { 
     do str::as_c_str(~"32 bit float mono audio") |default_audio| {
       do str::as_c_str(~"secretshit") |port_name| {
         let port_type : JackPortFlags = JackPortIsOutput;
-        //let out_port =  jack_port_register(client, port_name, default_audio, port_type as c_ulong, 0 as c_ulong);
-        jack_port_register(client, port_name, default_audio, port_type as c_ulong, 0 as c_ulong);
+        jack_port_register(client, port_name, default_audio, port_type as c_ulong, 0 as c_ulong)
       }
     }
   }
@@ -121,6 +128,18 @@ fn parse_jack_status (status: &c_int, results: & mut ~[JackStatus]) -> () {
 }
 
 
+
+//unsafe fn process( frames : JackNFrames, arg : *c_void ) -> c_int {
+//  io::println("in process!!!!!");  
+//
+//  jack_port_get_buffer (jack_port_t *, jack_nframes_t) 
+//	sample_t *buffer = (sample_t *) jack_port_get_buffer (output_port, nframes);
+//	memset (buffer, 0, sizeof (jack_default_audio_sample_t) * nframes);
+//}
+//  return 0; 
+//}
+//process (jack_nframes_t nframes, void *arg)
+
 fn main() -> () {
   do str::as_c_str(~"chicken") |client_name| {
     let options = 0 as c_int;
@@ -142,9 +161,20 @@ fn main() -> () {
         fail!(~"could not activate client"); 
       }
 
-      register_output_port(client);
+      let out_port = register_output_port(client);
+  
+      //list_ports(client);
 
-      list_ports(client);
+      let buffer = jack_port_get_buffer(out_port, 512);
+
+      io::println(fmt!("buffer: %?", *buffer));
+
+      //let arg = &0;
+      //let fptr: *u8 = process;
+
+      //if (jack_set_process_callback(client, fptr, arg as *c_void) !== 0) {
+      //  fail!("ERROR: unable to set process callback");
+      //}
 
       loop {
         sleep(1 as c_uint);
