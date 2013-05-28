@@ -1,17 +1,65 @@
-use core::libc::{c_void, c_int, c_char, c_ulong, c_uint, c_float};
-use core::libc::funcs::posix88::unistd::{sleep};
-use core::hashmap::linear;
+use core::libc::{c_void, c_int, c_char, c_ulong, c_uint, c_float };
 
-type JackClient          = c_void;
-type JackPort            = c_void;
-type c_str               = *c_char;
-type c_str_array         = *c_str;
-type JackProcessCallback = *u8;
-type JackNFrames         = u32;
+use core::libc::types::common::c99::{uint32_t};
+
+use core::libc::funcs::posix88::unistd::{sleep};
+use core::libc::funcs::c95::string::{memcpy};
+use core::hashmap::linear;
+use core::rand;
+
+type JackClient             = c_void;
+type JackPort               = c_void;
+type c_str                  = *c_char;
+type c_str_array            = *c_str;
+type JackNFrames            = libc::types::common::c99::uint32_t;
+//type JackProcessCallback    = extern "Rust" unsafe fn(JackNFrames, *core::libc::types::common::c95::c_void) -> c_int;
+type JackProcessCallback    = *u8;
 type JackDefaultAudioSample = c_float;  
 
+struct BoxedJackStatus {
+  pub val   : c_int,
+  pub errors: ~[JackStatus]
+}
+
+impl BoxedJackStatus {
+  fn parse_jack_status(& mut self) -> () {
+    let mut all_statuses = linear::LinearMap::new();
+    let mut remaining = self.val;
+
+    all_statuses.insert(0x01, JackFailure);
+    all_statuses.insert(0x02, JackInvalidOption);
+    all_statuses.insert(0x04, JackNameNotUnique);
+    all_statuses.insert(0x08, JackServerStarted);
+    all_statuses.insert(0x10, JackServerFailed);
+    all_statuses.insert(0x20, JackServerError); 
+    all_statuses.insert(0x40, JackNoSuchClient); 
+    all_statuses.insert(0x80, JackLoadFailure); 
+    all_statuses.insert(0x100, JackInitFailure); 
+    all_statuses.insert(0x200, JackShmFailure); 
+    all_statuses.insert(0x400, JackVersionError); 
+    all_statuses.insert(0x800, JackBackendError); 
+    all_statuses.insert(0x1000, JackClientZombie); 
+
+    if (remaining == 0) {
+      return; 
+    }
+
+    for uint::range_rev(6,0) |i| {
+      let bit_val = float::pow_with_uint(2, i) as int;
+      if remaining as int >= bit_val {
+        self.errors.push(*all_statuses.get(&bit_val));
+        remaining = remaining - bit_val as i32;
+      }
+      if (remaining == 0) {
+        break;  
+      }
+    }
+    return;
+  }
+}
+
 enum JackStatus {
-  JackFailure = 0x01,
+  JackFailure       = 0x01,
   JackInvalidOption = 0x02,
   JackNameNotUnique = 0x04,
   JackServerStarted = 0x08,
@@ -28,8 +76,8 @@ enum JackStatus {
 
 
 enum JackPortFlags {
-  JackPortIsInput = 0x1,
-  JackPortIsOutput = 0x2,
+  JackPortIsInput    = 0x1,
+  JackPortIsOutput   = 0x2,
   JackPortIsPhysical = 0x4,
   JackPortCanMonitor = 0x8,
   JackPortIsTerminal = 0x10
@@ -47,8 +95,8 @@ extern {
   fn jack_get_ports(client            : *JackClient, port_name_pattern : c_str, 
                     type_name_pattern : c_str,      flags              : c_ulong) -> c_str_array;
 
-	fn jack_set_process_callback (client : *JackClient,  process_callback : JackProcessCallback, 
-                                arg    : *c_void)   -> c_int;
+  fn jack_set_process_callback (client : *JackClient,  process_callback : JackProcessCallback, 
+      arg    : *c_void)   -> c_int;
 
   fn jack_port_get_buffer (port : *JackPort, frames : JackNFrames) -> *JackDefaultAudioSample;
 
@@ -90,70 +138,43 @@ fn list_ports(client : *JackClient) -> () {
   }
 }
 
+extern fn process( frames : JackNFrames, out_port_ptr: *c_void ) -> c_int {
+  unsafe {
+    io::println("in process!!!!!");  
+    //let buffer = jack_port_get_buffer(out_port_ptr as *JackPort, 512);
+    //let r = rand::Rng();
 
 
-fn parse_jack_status (status: &c_int, results: & mut ~[JackStatus]) -> () {
-  let mut all_statuses = linear::LinearMap::new();
-  let mut remaining = *status;
-
-  all_statuses.insert(0x01, JackFailure);
-  all_statuses.insert(0x02, JackInvalidOption);
-  all_statuses.insert(0x04, JackNameNotUnique);
-  all_statuses.insert(0x08, JackServerStarted);
-  all_statuses.insert(0x10, JackServerFailed);
-  all_statuses.insert(0x20, JackServerError); 
-  all_statuses.insert(0x40, JackNoSuchClient); 
-  all_statuses.insert(0x80, JackLoadFailure); 
-  all_statuses.insert(0x100, JackInitFailure); 
-  all_statuses.insert(0x200, JackShmFailure); 
-  all_statuses.insert(0x400, JackVersionError); 
-  all_statuses.insert(0x800, JackBackendError); 
-  all_statuses.insert(0x1000, JackClientZombie); 
-
-  if (*status == 0) {
-    return; 
+    //for int::range(0,frames as int) |i| {
+    //  let mut next_sample : float = rand::Rand::rand(r);
+    //  let f : float = rand::Rand::rand(r);
+    //  if (f < 0.5) {
+    //    next_sample = next_sample * -1.0;
+    //  }
+    //  let next_sample_ptr = core::ptr::addr_of(&next_sample);
+    //  memcpy(buffer as *c_void, (next_sample_ptr as *c_void), sys::size_of::<JackDefaultAudioSample>() as u64);
+    //}
+    return 0 as c_int; 
   }
-
-  for uint::range_rev(6,0) |i| {
-    let bit_val = float::pow_with_uint(2, i) as int;
-    if remaining as int >= bit_val {
-      results.push(*all_statuses.get(&bit_val));
-      remaining = remaining - bit_val as i32;
-    }
-    if (remaining == 0) {
-      break;  
-    }
-  }
-  return;
 }
-
-
-
-//unsafe fn process( frames : JackNFrames, arg : *c_void ) -> c_int {
-//  io::println("in process!!!!!");  
-//
-//  jack_port_get_buffer (jack_port_t *, jack_nframes_t) 
-//	sample_t *buffer = (sample_t *) jack_port_get_buffer (output_port, nframes);
-//	memset (buffer, 0, sizeof (jack_default_audio_sample_t) * nframes);
-//}
-//  return 0; 
-//}
-//process (jack_nframes_t nframes, void *arg)
 
 fn main() -> () {
   do str::as_c_str(~"chicken") |client_name| {
     let options = 0 as c_int;
-    let status_ptr : &c_int = &0;
-    let mut status_results :  ~[JackStatus] = ~[];
+    let mut status = BoxedJackStatus { val: 0, errors: ~[] };
 
     unsafe {
-      let client : *JackClient = jack_client_open(client_name, options, status_ptr); 
+      let client : *JackClient = jack_client_open(client_name, options, & status.val); 
 
       if (ptr::is_null(client)) {
-        parse_jack_status(status_ptr, & mut status_results);
-        fail!(fmt!("ERROR: connecting to server: %?", status_results)); 
-      } else {
-        io::println("client was FINE");
+        status.parse_jack_status();
+        fail!(fmt!("ERROR: connecting to server: %?", status.errors)); 
+      } 
+
+      let out_port_ptr = register_output_port(client);
+
+      if (jack_set_process_callback(client, process, out_port_ptr as *c_void) != 0) {
+        fail!(~"ERROR: unable to set process callback");
       }
 
 
@@ -161,20 +182,8 @@ fn main() -> () {
         fail!(~"could not activate client"); 
       }
 
-      let out_port = register_output_port(client);
-  
       //list_ports(client);
 
-      let buffer = jack_port_get_buffer(out_port, 512);
-
-      io::println(fmt!("buffer: %?", *buffer));
-
-      //let arg = &0;
-      //let fptr: *u8 = process;
-
-      //if (jack_set_process_callback(client, fptr, arg as *c_void) !== 0) {
-      //  fail!("ERROR: unable to set process callback");
-      //}
 
       loop {
         sleep(1 as c_uint);
