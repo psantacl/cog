@@ -116,7 +116,7 @@ unsafe fn from_c_str_array(str_array: c_str_array, results : & mut ~[~str]) -> (
 fn register_output_port(client : * JackPort) -> (*JackPort) {
   unsafe { 
     do str::as_c_str(~"32 bit float mono audio") |default_audio| {
-      do str::as_c_str(~"secretshit") |port_name| {
+      do str::as_c_str(~"out") |port_name| {
         let port_type : JackPortFlags = JackPortIsOutput;
         jack_port_register(client, port_name, default_audio, port_type as c_ulong, 0 as c_ulong)
       }
@@ -152,7 +152,7 @@ extern fn process( frames : JackNFrames, out_port_ptr: *c_void ) -> c_int {
 }
 
 fn main() -> () {
-  do str::as_c_str(~"chicken") |client_name| {
+  do str::as_c_str(~"Rusty Jack") |client_name| {
     let options = 0 as c_int;
     let mut status = BoxedJackStatus { val: 0, errors: ~[] };
 
