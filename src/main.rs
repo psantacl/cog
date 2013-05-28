@@ -4,6 +4,8 @@ use core::libc::types::common::c99::{uint32_t};
 
 use core::libc::funcs::posix88::unistd::{sleep};
 use core::libc::funcs::c95::string::{memcpy};
+use core::libc::{rand, RAND_MAX};
+
 use core::hashmap::linear;
 use core::rand;
 
@@ -141,27 +143,19 @@ fn list_ports(client : *JackClient) -> () {
 extern fn process( frames : JackNFrames, out_port_ptr: *c_void ) -> c_int {
   unsafe {
     let buffer = jack_port_get_buffer(out_port_ptr as *JackPort, frames);
-    //let r = rand::Rng();
-    let mut next_sample : c_float = 1.0;
+    let mut next_sample : c_float = (rand() as c_float / (RAND_MAX as c_float) * 2.0) - 1.0 ;
+    //let mut next_sample : c_float = 1.0;
 
     for uint::range(0,frames as uint) |i| {
-      if i % 2 == 0 {
-       next_sample = next_sample * -1.0; 
-      }
+      //if i % 2 == 0 {
+      // next_sample = next_sample * -1.0; 
+      //}
 
       let next_sample_ptr = core::ptr::addr_of(&next_sample);
       let buffer_ptr      = core::ptr::offset(buffer as *c_void, i);
 
       memcpy(buffer_ptr, (next_sample_ptr as *c_void), sys::size_of::<JackDefaultAudioSample>() as u64);
     }
-    //  let mut next_sample : float = rand::Rand::rand(r);
-    //  let f : float = rand::Rand::rand(r);
-    //  if (f < 0.5) {
-    //    next_sample = next_sample * -1.0;
-    //  }
-    //  let next_sample_ptr = core::ptr::addr_of(&next_sample);
-    //  memcpy(buffer as *c_void, (next_sample_ptr as *c_void), sys::size_of::<JackDefaultAudioSample>() as u64);
-    //}
     return 0 as c_int; 
   }
 }
