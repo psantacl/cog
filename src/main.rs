@@ -140,12 +140,20 @@ fn list_ports(client : *JackClient) -> () {
 
 extern fn process( frames : JackNFrames, out_port_ptr: *c_void ) -> c_int {
   unsafe {
-    io::println("in process!!!!!");  
-    //let buffer = jack_port_get_buffer(out_port_ptr as *JackPort, 512);
+    let buffer = jack_port_get_buffer(out_port_ptr as *JackPort, frames);
     //let r = rand::Rng();
+    let mut next_sample : c_float = 1.0;
 
+    for uint::range(0,frames as uint) |i| {
+      if i % 2 == 0 {
+       next_sample = next_sample * -1.0; 
+      }
 
-    //for int::range(0,frames as int) |i| {
+      let next_sample_ptr = core::ptr::addr_of(&next_sample);
+      let buffer_ptr      = core::ptr::offset(buffer as *c_void, i);
+
+      memcpy(buffer_ptr, (next_sample_ptr as *c_void), sys::size_of::<JackDefaultAudioSample>() as u64);
+    }
     //  let mut next_sample : float = rand::Rand::rand(r);
     //  let f : float = rand::Rand::rand(r);
     //  if (f < 0.5) {
