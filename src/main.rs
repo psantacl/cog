@@ -1,4 +1,4 @@
-use core::libc::{c_void, c_int, c_char, c_ulong, c_uint, c_float, c_double, uint32_t};
+use core::libc::{c_void, c_int, c_char, c_ulong, c_uint, c_float, c_double, uint32_t, size_t, memset};
 
 use core::libc::funcs::posix88::unistd::{sleep};
 use core::libc::funcs::c95::string::{memcpy};
@@ -19,6 +19,57 @@ struct BoxedJackStatus {
   pub val   : c_int,
   pub errors: ~[JackStatus]
 }
+
+struct JackRingBuffer {
+  buf       : *c_char,
+  write_ptr : size_t, 
+  read_ptr  : size_t,
+  size      : size_t,
+  size_mask : size_t,
+  mlocked   : c_int
+}
+
+struct ProcessArgs {
+  pub out_port_ptr: *JackPort,
+  pub rb_ptr: *JackRingBuffer
+}
+
+fn write_cstr(c: *c_char) -> () {
+  unsafe { 
+    use core::libc::{puts};
+    puts(c);
+  }
+  //use core::libc::{write, strlen};
+  //write(1, p as *c_void , 1);
+  //use core::vec;
+  //use core::cast::{transmute};
+
+  //unsafe { 
+  //  let len = strlen(p);
+  //  let p: *u8 = transmute(p);
+  //  do vec::raw::buf_as_slice(p, len as uint) |s| {
+  //    write(1, s as *c_void , len);
+  //  }
+  //}
+}
+
+
+//TODO:
+//int jack_client_close ( jack_client_t ∗ client )
+//int jack_deactivate ( jack_client_t ∗ client )
+
+//Callbacks:
+//void jack_on_shutdown ( jack_client_t ∗ client, JackShutdownCallback function, void ∗ arg )
+//int jack_set_buffer_size_callback ( jack_client_t ∗ client, JackBufferSizeCallback bufsize_callback, void ∗ arg )
+//int jack_set_port_connect_callback ( jack_client_t ∗ , JackPortConnectCallback connect_callback, void ∗ arg )
+//float jack_cpu_load ( jack_client_t ∗ client )
+//jack_nframes_t jack_get_buffer_size ( jack_client_t ∗ )
+//jack_nframes_t jack_get_sample_rate ( jack_client_t ∗ )
+
+//Ports:
+//int jack_connect ( jack_client_t ∗ , const char ∗ source_port, const char ∗ destination_port )
+//int jack_disconnect ( jack_client_t ∗ , const char ∗ source_port, const char ∗ destination_port )
+
 
 impl BoxedJackStatus {
   fn parse_jack_status(& mut self) -> () {
@@ -88,17 +139,24 @@ extern {
   fn jack_activate( client : *JackClient) -> c_int;
 
   fn jack_port_register(client      : *JackClient,    port_name : c_str, 
-                        port_type   : c_str,          flags     : c_ulong, 
-                        buffer_size : c_ulong)     -> *JackPort;
+      port_type   : c_str,          flags     : c_ulong, 
+      buffer_size : c_ulong)     -> *JackPort;
 
   fn jack_get_ports(client            : *JackClient, port_name_pattern : c_str, 
-                    type_name_pattern : c_str,      flags              : c_ulong) -> c_str_array;
+      type_name_pattern : c_str,      flags              : c_ulong) -> c_str_array;
 
   fn jack_set_process_callback (client : *JackClient,  process_callback : JackProcessCallback, 
       arg    : *c_void)   -> c_int;
 
   fn jack_port_get_buffer (port : *JackPort, frames : JackNFrames) -> *JackDefaultAudioSample;
 
+  fn jack_ringbuffer_create ( sz : size_t ) -> *JackRingBuffer;
+  fn jack_ringbuffer_free   ( rb : *JackRingBuffer ) -> ();
+  fn jack_ringbuffer_mlock  ( rb : *JackRingBuffer ) -> c_int;
+  fn jack_ringbuffer_read_space ( rb :  *JackRingBuffer ) -> size_t;
+  fn jack_ringbuffer_read   ( rb: *JackRingBuffer, dest : *c_char, cnt: size_t ) -> size_t;
+  fn jack_ringbuffer_write_space ( rb: *JackRingBuffer ) -> size_t;
+  fn jack_ringbuffer_write  ( rb: *JackRingBuffer, src : *char, cnt : size_t ) -> size_t;
 }
 
 
@@ -137,9 +195,55 @@ fn list_ports(client : *JackClient) -> () {
   }
 }
 
-extern fn process( frames : JackNFrames, out_port_ptr: *c_void ) -> c_int {
+extern fn process_ring_buffer( frames: JackNFrames, args: *c_void ) -> c_int {
+  use core::libc::{puts};
   unsafe {
-    let buffer = jack_port_get_buffer(out_port_ptr as *JackPort, frames);
+    let out_port_ptr = (*(args as *ProcessArgs)).out_port_ptr; 
+    let rb_ptr = (*(args as *ProcessArgs)).rb_ptr;
+    let buffer = jack_port_get_buffer( out_port_ptr, frames);
+    let available_read : size_t = jack_ringbuffer_read_space(rb_ptr);
+
+    //do str::as_c_str(fmt!("Available Read: %d", available_read as int)) |c_str| {
+    //  puts( c_str as *c_char );
+    //}
+
+    //do str::as_c_str(fmt!("NFrames: %d", frames as int)) |c_str| {
+    //  puts( c_str as *c_char );
+    //}
+
+    if (available_read as JackNFrames > frames) {
+      //read what you can(available_read), pad the rest with silence  
+      for uint::range(0, available_read/4 as uint) |i| {
+        let buffer_ptr = buffer as uint + (sys::size_of::<JackDefaultAudioSample>() * i);
+        let result : size_t = jack_ringbuffer_read(rb_ptr, buffer_ptr as *c_char, sys::size_of::<JackDefaultAudioSample>() as u64);
+
+        if (result  != sys::size_of::<JackDefaultAudioSample>() as u64) {
+          do str::as_c_str(fmt!("Read Result: %d", result as int)) |c_str| {
+            puts( c_str as *c_char );
+          }
+          return -1 as c_int;
+        }
+      }
+      //let offset : uint = available_read as uint + 1;
+      //let buffer_ptr = buffer as uint + (sys::size_of::<JackDefaultAudioSample>() * offset );
+      //memset( buffer_ptr as *c_void, 0, (sys::size_of::<JackDefaultAudioSample>() * (frames as uint) - offset) as u64 );
+    } else {
+      //read frames worth from buffer
+      //for uint::range(0, frames as uint) |i| {
+      //  let buffer_ptr = buffer as uint + (sys::size_of::<JackDefaultAudioSample>() * i);
+      //  let result = jack_ringbuffer_read( rb_ptr, buffer_ptr as *c_char, sys::size_of::<JackDefaultAudioSample>() as u64);
+      //  if (result != frames as u64) {
+      //    return -1;
+      //  }
+      //}
+    }
+  }
+  return 0 as c_int;
+}
+
+extern fn process_noise( frames : JackNFrames, args: *c_void ) -> c_int {
+  unsafe {
+    let buffer = jack_port_get_buffer( (*(args as *ProcessArgs)).out_port_ptr, frames);
     for uint::range(0, frames as uint) |i| {
       let mut next_sample : JackDefaultAudioSample = ((rand() as c_double/ (RAND_MAX as c_double) * 2.0) - 1.0) as JackDefaultAudioSample;
       let next_sample_ptr = core::ptr::addr_of(&next_sample);
@@ -155,7 +259,6 @@ fn main() -> () {
   do str::as_c_str(~"Rusty Jack") |client_name| {
     let options = 0 as c_int;
     let mut status = BoxedJackStatus { val: 0, errors: ~[] };
-
     unsafe {
       let client : *JackClient = jack_client_open(client_name, options, & status.val); 
 
@@ -165,11 +268,18 @@ fn main() -> () {
       } 
 
       let out_port_ptr = register_output_port(client);
+      let initial_size = (1024 * sys::size_of::<JackDefaultAudioSample>() as u64);
+      let rb = jack_ringbuffer_create( initial_size );
 
-      if (jack_set_process_callback(client, process, out_port_ptr as *c_void) != 0) {
-        fail!(~"ERROR: unable to set process callback");
+      if (jack_ringbuffer_mlock(rb) != 0) {
+        fail!(~"ERROR: unable mlock ring buffer");
       }
 
+      let process_args = ~ProcessArgs { out_port_ptr : out_port_ptr, rb_ptr: rb };
+
+      if (jack_set_process_callback(client, process_ring_buffer, ptr::addr_of(process_args) as *c_void) != 0) {
+        fail!(~"ERROR: unable to set process callback");
+      }
 
       if (jack_activate(client) != 0) {
         fail!(~"could not activate client"); 
@@ -177,10 +287,21 @@ fn main() -> () {
 
       //list_ports(client);
 
-
       loop {
-        sleep(1 as c_uint);
-      }
+        let mut available_write = jack_ringbuffer_write_space(rb);
+        while (available_write > sys::size_of::<JackDefaultAudioSample>() as u64) {
+          let mut next_sample : JackDefaultAudioSample = ((rand() as c_double/ (RAND_MAX as c_double) * 2.0) - 1.0) as JackDefaultAudioSample;
+          let next_sample_ptr = core::ptr::addr_of(&next_sample);
+
+          let write_result = jack_ringbuffer_write(rb, next_sample_ptr as *char, sys::size_of::<JackDefaultAudioSample>() as u64);
+
+          if (write_result != 4) {
+            fail!(~"ERROR: while writing to ring buffer");
+          }
+          available_write -= write_result;
+        }
+        //sleep(1 as c_uint);
+      } //loop
 
     }
   }
