@@ -1,3 +1,5 @@
+extern mod std;
+
 use core::libc::{c_void, c_int, c_char, c_ulong, c_uint, c_float, c_double, uint32_t, size_t, memset};
 
 use core::libc::funcs::posix88::unistd::{sleep};
@@ -6,6 +8,8 @@ use core::libc::{rand, RAND_MAX};
 
 use core::hashmap::linear;
 use core::rand;
+use core::pipes::{stream, Port, Chan};
+
 
 type JackClient             = c_void;
 type JackPort               = c_void;
@@ -31,7 +35,8 @@ struct JackRingBuffer {
 
 struct ProcessArgs {
   pub out_port_ptr: *JackPort,
-  pub rb_ptr: *JackRingBuffer
+  pub rb_ptr: *JackRingBuffer,
+  pub chan : Chan<~str>
 }
 
 fn write_cstr(c: *c_char) -> () {
@@ -39,18 +44,6 @@ fn write_cstr(c: *c_char) -> () {
     use core::libc::{puts};
     puts(c);
   }
-  //use core::libc::{write, strlen};
-  //write(1, p as *c_void , 1);
-  //use core::vec;
-  //use core::cast::{transmute};
-
-  //unsafe { 
-  //  let len = strlen(p);
-  //  let p: *u8 = transmute(p);
-  //  do vec::raw::buf_as_slice(p, len as uint) |s| {
-  //    write(1, s as *c_void , len);
-  //  }
-  //}
 }
 
 
@@ -237,6 +230,7 @@ extern fn process_ring_buffer( frames: JackNFrames, args: *c_void ) -> c_int {
       //  }
       //}
     }
+    (*(args as *ProcessArgs)).chan.send(~"give me more data");
   }
   return 0 as c_int;
 }
@@ -275,7 +269,10 @@ fn main() -> () {
         fail!(~"ERROR: unable mlock ring buffer");
       }
 
-      let process_args = ~ProcessArgs { out_port_ptr : out_port_ptr, rb_ptr: rb };
+      let (main_port, main_chan): (Port<~str>, Chan<~str>) = stream();
+      let process_args = ~ProcessArgs { out_port_ptr : out_port_ptr, 
+                                        rb_ptr       : rb, 
+                                        chan         : main_chan };
 
       if (jack_set_process_callback(client, process_ring_buffer, ptr::addr_of(process_args) as *c_void) != 0) {
         fail!(~"ERROR: unable to set process callback");
@@ -300,6 +297,8 @@ fn main() -> () {
           }
           available_write -= write_result;
         }
+        let next_result = main_port.recv();
+        io::println(next_result);
         //sleep(1 as c_uint);
       } //loop
 
