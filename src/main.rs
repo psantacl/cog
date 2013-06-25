@@ -1,7 +1,6 @@
 extern mod std;
-//extern mod socket;
 
-use core::libc::{c_void, c_int, c_char, c_ulong, c_uint, c_float, c_double, uint32_t, size_t, memset, mkfifo, fchmod, S_IRUSR, S_IWUSR, O_RDONLY, open, read, malloc, free};
+use core::libc::{c_void, c_int, c_char, c_ulong, c_uint, c_float, c_double, uint32_t, size_t, memset, mkfifo, S_IRUSR, S_IWUSR, O_RDONLY, open, read, malloc, free, close};
 use core::str::raw::{from_c_str};
 use core::libc::funcs::posix88::unistd::{sleep};
 use core::libc::funcs::c95::string::{memcpy};
@@ -11,14 +10,14 @@ use core::hashmap::linear;
 use core::rand;
 use core::pipes::{stream, Port, Chan};
 
+type JackClient               = c_void;
+type JackPort                 = c_void;
+type c_str                    = *c_char;
+type c_str_array              = *c_str;
+type JackNFrames              = uint32_t;
+type JackProcessCallback      = *u8;
+type JackDefaultAudioSample   = c_float;  
 
-type JackClient             = c_void;
-type JackPort               = c_void;
-type c_str                  = *c_char;
-type c_str_array            = *c_str;
-type JackNFrames            = uint32_t;
-type JackProcessCallback    = *u8;
-type JackDefaultAudioSample = c_float;  
 
 struct BoxedJackStatus {
   pub val   : c_int,
@@ -37,7 +36,7 @@ struct JackRingBuffer {
 struct ProcessArgs {
   pub out_port_ptr: *JackPort,
   pub rb_ptr: *JackRingBuffer,
-  pub chan : Chan<int>
+  pub chan : Chan<~str>
 }
 
 fn write_cstr(c: *c_char) -> () {
@@ -49,9 +48,6 @@ fn write_cstr(c: *c_char) -> () {
 
 
 //TODO:
-//int jack_client_close ( jack_client_t ∗ client )
-//int jack_deactivate ( jack_client_t ∗ client )
-
 //Callbacks:
 //void jack_on_shutdown ( jack_client_t ∗ client, JackShutdownCallback function, void ∗ arg )
 //int jack_set_buffer_size_callback ( jack_client_t ∗ client, JackBufferSizeCallback bufsize_callback, void ∗ arg )
@@ -102,6 +98,7 @@ impl BoxedJackStatus {
   }
 }
 
+
 enum JackStatus {
   JackFailure       = 0x01,
   JackInvalidOption = 0x02,
@@ -127,10 +124,19 @@ enum JackPortFlags {
   JackPortIsTerminal = 0x10
 }
 
+enum PlayMethod { 
+  Clean, 
+  Clip,
+  ClipMantissa
+}
+
 #[link_args = "-ljack"]
 extern {
   fn jack_client_open( client_name : c_str,  options : c_int, status: *c_int) -> *JackClient;
+  fn jack_client_close ( c: *JackClient ) -> c_int;
+
   fn jack_activate( client : *JackClient) -> c_int;
+  fn jack_deactivate( client: *JackClient ) -> c_int;
 
   fn jack_port_register(client      : *JackClient,    port_name : c_str, 
       port_type   : c_str,          flags     : c_ulong, 
@@ -151,6 +157,8 @@ extern {
   fn jack_ringbuffer_read   ( rb: *JackRingBuffer, dest : *c_char, cnt: size_t ) -> size_t;
   fn jack_ringbuffer_write_space ( rb: *JackRingBuffer ) -> size_t;
   fn jack_ringbuffer_write  ( rb: *JackRingBuffer, src : *char, cnt : size_t ) -> size_t;
+
+
 }
 
 
@@ -234,7 +242,7 @@ extern fn process_ring_buffer( frames: JackNFrames, args: *c_void ) -> c_int {
     //copy over as much of the requested data as we have available in the ring buffer
     for uint::range(0, frames_to_be_read as uint) |i| {
       let buffer_ptr = buffer as uint + offset;
-
+      
       //(*(args as *ProcessArgs)).chan.send( *(buffer_ptr as *f32) );
       let result : size_t = jack_ringbuffer_read(rb_ptr, buffer_ptr as *c_char, sys::size_of::<JackDefaultAudioSample>() as u64);
 
@@ -259,7 +267,7 @@ extern fn process_ring_buffer( frames: JackNFrames, args: *c_void ) -> c_int {
       let buffer_ptr = buffer as uint + offset;
       memset( buffer_ptr as *c_void, 0, (total_bytes_requested - bytes_available) );
     }
-    (*(args as *ProcessArgs)).chan.send(frames as int);
+    (*(args as *ProcessArgs)).chan.send(~"more");
   }
   return 0 as c_int;
 }
@@ -307,7 +315,7 @@ fn ensure_fifo_pipe() -> () {
   }
 }
 
-fn read_from_fifo_clean(rb : *JackRingBuffer, pipe: c_int) -> () {
+fn read_from_fifo_clean(rb : *JackRingBuffer, pipe: c_int, cb: &fn(f32) -> f32) -> () {
   unsafe {
     let mut bytes_written = 0;
     let mut rb_available_space = jack_ringbuffer_write_space(rb);
@@ -325,28 +333,27 @@ fn read_from_fifo_clean(rb : *JackRingBuffer, pipe: c_int) -> () {
       }
     
       let mut curr_ptr : *mut c_void  = read_buffer as *mut c_void;
+      //let chicken = vec::raw::from_buf_raw::<u8>(read_buffer as *u8, bytes_available_from_pipe as uint);
+      //do vec::as_mut_buf(chicken)  |v,size| {
+      //  io::println(fmt!("tuna: %?, size: %?", v, size));
 
+      //}
       while (bytes_available_from_pipe > 0) {
-        let next_sample : f32 =  *(curr_ptr as  *f32); 
+        let mut next_sample : f32 =  *(curr_ptr as  *f32); 
 
         curr_ptr = (curr_ptr as uint + 4) as *mut c_void;
         bytes_available_from_pipe = bytes_available_from_pipe - 4;
 
-        if (next_sample > 1.0 || next_sample < -1.0 || 
-            (next_sample > -0.001 && next_sample < 0.001))
-           {
-          loop;
-        }
-
+        next_sample = cb(next_sample);
         bytes_written = bytes_written + 4;
         let write_result = jack_ringbuffer_write(rb, ptr::addr_of(&next_sample) as *char, 4);
       }
 
       free(read_buffer);
     }
-
   }
 }
+
 
 fn read_from_fifo(rb : *JackRingBuffer, pipe: c_int) -> () {
   unsafe {
@@ -381,17 +388,12 @@ fn read_from_fifo(rb : *JackRingBuffer, pipe: c_int) -> () {
       //io::println(fmt!("after:  %?", *(chicken as *f32)));
       //let write_result = jack_ringbuffer_write(rb, chicken as *char, 4);
 
-      //if (next_sample > 1.0) {
-      //   next_sample = 1.0
-      //} else if (next_sample < -1.0) {
-      //    next_sample = -1.0;
-      //} 
-      //let write_result = jack_ringbuffer_write(rb, ptr::addr_of(&next_sample) as *char, 4);
     }
     //let write_result = jack_ringbuffer_write(rb, read_buffer as *char, bytes_read  as u64);
     free(read_buffer);
   }
 }
+
 
 fn main() -> () {
   unsafe { 
@@ -415,10 +417,11 @@ fn main() -> () {
         fail!(~"ERROR: unable mlock ring buffer");
       }
 
-      let (main_port, main_chan): (Port<int>, Chan<int>) = stream();
+
+      let (fifo_cmd_port, fifo_cmd_chan): (Port<~str>, Chan<~str>) = stream();
       let process_args = ~ProcessArgs { out_port_ptr : out_port_ptr, 
         rb_ptr       : rb, 
-        chan         : main_chan };
+        chan         : fifo_cmd_chan };
 
       if (jack_set_process_callback(client, process_ring_buffer, ptr::addr_of(process_args) as *c_void) != 0) {
         fail!(~"ERROR: unable to set process callback");
@@ -428,28 +431,68 @@ fn main() -> () {
         fail!(~"could not activate client"); 
       }
 
+
+      let (std_in_port, std_in_chan): (Port<~str>, Chan<~str>) = stream();
+
+      //task for handling stdin
+      do spawn {
+        loop {
+          io::println(~"q) quit 0)clean 1)clip");
+          let next_line : ~str = io::stdin().read_line();
+          if (next_line == ~"q") {
+            std_in_chan.send( next_line );
+            break;
+          }
+          std_in_chan.send( next_line );
+        }
+      };
+
       //list_ports(client);
 
       do str::as_c_str(~"/tmp/rusty-jack-in") |pipe_path| {
-        let pipe = open( pipe_path, O_RDONLY as i32, (S_IWUSR | S_IRUSR ) as i32);
+        let pipe = open( pipe_path, (O_RDONLY | 0x0004) as i32, (S_IWUSR | S_IRUSR ) as i32);
+        let mut method = Clip; 
+        let cb2 = |next_sample: f32| {
+          io::println("cb2");
+          let mut next_sample_int : u32 = *(((&next_sample) as *f32) as *u32);
+          next_sample_int = next_sample_int & 0b1_01111100_11111111111111111111111;
+          *(ptr::addr_of(&next_sample_int) as *f32)
+        };
+
+        let cb = |next_sample: f32| {
+          io::println("cb");
+          let mut sample : f32 = next_sample;
+          if (sample > 1.0) {
+            sample = 1.0
+          } else if (sample < -1.0) {
+            sample = -1.0;
+          } 
+          sample
+        };
+
         loop {
-          read_from_fifo_clean(rb, pipe);  
-          let next_result = main_port.recv();
-          //let mut available_write = jack_ringbuffer_write_space(rb);
-          //while (available_write > sys::size_of::<JackDefaultAudioSample>() as u64) {
-          //  let mut next_sample : JackDefaultAudioSample = ((rand() as c_double/ (RAND_MAX as c_double) * 2.0) - 1.0) as JackDefaultAudioSample;
-          //  let next_sample_ptr = core::ptr::addr_of(&next_sample);
+          match method {
+            Clean    =>   { read_from_fifo_clean(rb, pipe, cb) },   
+            Clip     =>   { read_from_fifo_clean(rb, pipe, cb2)  },
+            _        =>   { fail!(fmt!("ERROR: unsupported playback method(%?)", method)) }
+          };
+          fifo_cmd_port.recv();
+          if (std_in_port.peek()) {
+            match std_in_port.recv() {
+              ~"q"   =>  {
+                jack_deactivate(client);
+                jack_client_close(client);
+                break;
+              }
 
-          //  let write_result = jack_ringbuffer_write(rb, next_sample_ptr as *char, sys::size_of::<JackDefaultAudioSample>() as u64);
-
-          //  if (write_result != 4) {
-          //    fail!(~"ERROR: while writing to ring buffer");
-          //  }
-          //  available_write -= write_result;
-          //}
-          //let next_result = main_port.recv();
-        } //loop
-      }
+              ~"0" => { method = Clean;}
+              ~"1" => { method = Clip;}
+              _ => {}
+            }
+          }
+        } //loop 
+        close(pipe);
+      } 
     }
   }
 }
