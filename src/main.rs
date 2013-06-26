@@ -315,7 +315,7 @@ fn ensure_fifo_pipe() -> () {
   }
 }
 
-fn read_from_fifo_clean(rb : *JackRingBuffer, pipe: c_int, cb: &fn(f32) -> f32) -> () {
+fn read_from_fifo_clean(rb : *JackRingBuffer, pipe: c_int, cb: &fn(*c_void, i64) -> (*c_void, u64)) -> () {
   unsafe {
     let mut bytes_written = 0;
     let mut rb_available_space = jack_ringbuffer_write_space(rb);
@@ -338,18 +338,23 @@ fn read_from_fifo_clean(rb : *JackRingBuffer, pipe: c_int, cb: &fn(f32) -> f32) 
       //  io::println(fmt!("tuna: %?, size: %?", v, size));
 
       //}
-      while (bytes_available_from_pipe > 0) {
-        let mut next_sample : f32 =  *(curr_ptr as  *f32); 
+      let (processed_bytes, processed_bytes_size) = cb(read_buffer, bytes_available_from_pipe);
+      bytes_written = bytes_written + processed_bytes_size;
 
-        curr_ptr = (curr_ptr as uint + 4) as *mut c_void;
-        bytes_available_from_pipe = bytes_available_from_pipe - 4;
-
-        next_sample = cb(next_sample);
-        bytes_written = bytes_written + 4;
-        let write_result = jack_ringbuffer_write(rb, ptr::addr_of(&next_sample) as *char, 4);
-      }
-
+      let write_result = jack_ringbuffer_write(rb, processed_bytes as *char, processed_bytes_size);
       free(read_buffer);
+
+      //while (bytes_available_from_pipe > 0) {
+      //  let mut next_sample : f32 =  *(curr_ptr as  *f32); 
+
+      //  curr_ptr = (curr_ptr as uint + 4) as *mut c_void;
+      //  bytes_available_from_pipe = bytes_available_from_pipe - 4;
+
+      //  next_sample = cb(next_sample);
+      //  bytes_written = bytes_written + 4;
+      //  let write_result = jack_ringbuffer_write(rb, ptr::addr_of(&next_sample) as *char, 4);
+      //}
+      //free(read_buffer);
     }
   }
 }
@@ -452,27 +457,45 @@ fn main() -> () {
       do str::as_c_str(~"/tmp/rusty-jack-in") |pipe_path| {
         let pipe = open( pipe_path, (O_RDONLY | 0x0004) as i32, (S_IWUSR | S_IRUSR ) as i32);
         let mut method = Clip; 
-        let cb2 = |next_sample: f32| {
-          io::println("cb2");
-          let mut next_sample_int : u32 = *(((&next_sample) as *f32) as *u32);
-          next_sample_int = next_sample_int & 0b1_01111100_11111111111111111111111;
-          *(ptr::addr_of(&next_sample_int) as *f32)
+
+        let cb2 = |bytes: *c_void, bytes_size: i64| {
+          let mut curr_ptr : *mut c_void  = bytes as *mut c_void;
+          let mut bytes_processed : u64 = 0;
+      
+          while (bytes_processed < bytes_size as u64) {
+            let mut next_sample_int : u32= *(curr_ptr as *u32);
+            next_sample_int = next_sample_int & 0b1_01111100_11111111111111111111111;
+
+            memcpy( curr_ptr as *c_void, (core::ptr::addr_of(&next_sample_int) as *c_void), sys::size_of::<JackDefaultAudioSample>() as u64);
+            curr_ptr = (curr_ptr as uint + 4) as *mut c_void;
+            bytes_processed = bytes_processed + 4;
+          }
+          (bytes, bytes_processed)
         };
 
-        let cb = |next_sample: f32| {
-          io::println("cb");
-          let mut sample : f32 = next_sample;
-          if (sample > 1.0) {
-            sample = 1.0
-          } else if (sample < -1.0) {
-            sample = -1.0;
-          } 
-          sample
+
+        let cb1 = |bytes: *c_void, bytes_size: i64| {
+          let mut curr_ptr : *mut c_void  = bytes as *mut c_void;
+          let mut bytes_processed : u64 = 0;
+      
+          while (bytes_processed < bytes_size as u64) {
+            let mut next_sample : f32 = *(curr_ptr as *f32);
+            if (next_sample > 1.0) {
+              next_sample = 1.0;
+            } else if (next_sample < -1.0) {
+              next_sample = -1.0;
+            } 
+
+            memcpy( curr_ptr as *c_void, (core::ptr::addr_of(&next_sample) as *c_void), sys::size_of::<JackDefaultAudioSample>() as u64);
+            curr_ptr = (curr_ptr as uint + 4) as *mut c_void;
+            bytes_processed = bytes_processed + 4;
+          }
+          (bytes, bytes_processed)
         };
 
         loop {
           match method {
-            Clean    =>   { read_from_fifo_clean(rb, pipe, cb) },   
+            Clean    =>   { read_from_fifo_clean(rb, pipe, cb1) },   
             Clip     =>   { read_from_fifo_clean(rb, pipe, cb2)  },
             _        =>   { fail!(fmt!("ERROR: unsupported playback method(%?)", method)) }
           };
