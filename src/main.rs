@@ -457,9 +457,9 @@ fn main() -> () {
       do str::as_c_str(~"/tmp/rusty-jack-in") |pipe_path| {
         let pipe = open( pipe_path, (O_RDONLY | 0x0004) as i32, (S_IWUSR | S_IRUSR ) as i32);
         let mut method = Clean; 
+        let mut in_stutter = false;
 
         let cb3 = |bytes: *c_void, bytes_size: i64| {
-          let mut in_stutter = false;
           let mut stutter_sample : f32 = 0.0;
           let mut curr_ptr : *mut c_void  = bytes as *mut c_void;
           let mut bytes_processed : u64 = 0;
