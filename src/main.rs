@@ -126,8 +126,8 @@ enum JackPortFlags {
 
 enum PlayMethod { 
   Clean, 
-  Clip,
-  ClipMantissa
+  BitReduce,
+  Stutter
 }
 
 #[link_args = "-ljack"]
@@ -442,7 +442,7 @@ fn main() -> () {
       //task for handling stdin
       do spawn {
         loop {
-          io::println(~"q) quit 0)clean 1)clip");
+          io::println(~"q) quit 0)clean 1)bit reduce 2)stutter");
           let next_line : ~str = io::stdin().read_line();
           if (next_line == ~"q") {
             std_in_chan.send( next_line );
@@ -456,12 +456,58 @@ fn main() -> () {
 
       do str::as_c_str(~"/tmp/rusty-jack-in") |pipe_path| {
         let pipe = open( pipe_path, (O_RDONLY | 0x0004) as i32, (S_IWUSR | S_IRUSR ) as i32);
-        let mut method = Clip; 
+        let mut method = Clean; 
+
+        let cb3 = |bytes: *c_void, bytes_size: i64| {
+          let mut in_stutter = false;
+          let mut stutter_sample : f32 = 0.0;
+          let mut curr_ptr : *mut c_void  = bytes as *mut c_void;
+          let mut bytes_processed : u64 = 0;
+          let mut previous_sample: f32 = 0.0;
+          let mut next_sample : f32 =  0.0;
+          let p_of_start_stutter : c_double = 0.0001;
+          let p_of_end_stutter : c_double = 0.00001;
+
+          while (bytes_processed < bytes_size as u64) {
+            if (in_stutter) {
+              io::println(~"in stutter");
+              if (rand() as c_double / (RAND_MAX as c_double) < p_of_end_stutter) {
+                in_stutter = false;
+                next_sample = *(curr_ptr as *f32);
+              } else {
+                next_sample = stutter_sample;
+              }
+            } else {
+              io::println(~"normal");
+              //can't stutter on first sample
+              if (bytes_processed == 0) {
+                next_sample = *(curr_ptr as *f32);
+              } else {
+                //begin stutter?
+                if (rand() as c_double / (RAND_MAX as c_double) < p_of_start_stutter) {
+                  in_stutter = true;
+                  stutter_sample = *(curr_ptr as *f32);
+                } 
+                next_sample = *(curr_ptr as *f32);
+              }
+            } 
+
+            if (next_sample > 1.0) {
+              next_sample = 1.0;
+            } else if (next_sample < -1.0) {
+              next_sample = -1.0;
+            } 
+            memcpy( curr_ptr as *c_void, (core::ptr::addr_of(&next_sample) as *c_void), sys::size_of::<JackDefaultAudioSample>() as u64);
+            curr_ptr = (curr_ptr as uint + 4) as *mut c_void;
+            bytes_processed = bytes_processed + 4;
+          }
+          (bytes, bytes_processed)
+        };
 
         let cb2 = |bytes: *c_void, bytes_size: i64| {
           let mut curr_ptr : *mut c_void  = bytes as *mut c_void;
           let mut bytes_processed : u64 = 0;
-      
+
           while (bytes_processed < bytes_size as u64) {
             let mut next_sample_int : u32= *(curr_ptr as *u32);
             next_sample_int = next_sample_int & 0b1_01111100_11111111111111111111111;
@@ -477,7 +523,7 @@ fn main() -> () {
         let cb1 = |bytes: *c_void, bytes_size: i64| {
           let mut curr_ptr : *mut c_void  = bytes as *mut c_void;
           let mut bytes_processed : u64 = 0;
-      
+
           while (bytes_processed < bytes_size as u64) {
             let mut next_sample : f32 = *(curr_ptr as *f32);
             if (next_sample > 1.0) {
@@ -495,9 +541,9 @@ fn main() -> () {
 
         loop {
           match method {
-            Clean    =>   { read_from_fifo_clean(rb, pipe, cb1) },   
-            Clip     =>   { read_from_fifo_clean(rb, pipe, cb2)  },
-            _        =>   { fail!(fmt!("ERROR: unsupported playback method(%?)", method)) }
+            Clean     =>   { read_from_fifo_clean(rb, pipe, cb1) },   
+            BitReduce =>   { read_from_fifo_clean(rb, pipe, cb2)  },
+            Stutter   =>   { read_from_fifo_clean(rb, pipe, cb3)  }
           };
           fifo_cmd_port.recv();
           if (std_in_port.peek()) {
@@ -509,7 +555,8 @@ fn main() -> () {
               }
 
               ~"0" => { method = Clean;}
-              ~"1" => { method = Clip;}
+              ~"1" => { method = BitReduce;}
+              ~"2" => { method = Stutter;}
               _ => {}
             }
           }
