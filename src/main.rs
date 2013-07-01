@@ -400,6 +400,69 @@ fn read_from_fifo(rb : *JackRingBuffer, pipe: c_int) -> () {
 }
 
 
+struct StutterBuffer {
+  pub stutter_idx : int,
+  pub data : ~[f32],
+  pub in_stutter: bool
+}
+
+impl StutterBuffer {
+  fn end_stutter_pred(&mut self) -> () {
+    let p_of_end_stutter : c_double = 0.0001;
+    if (!self.in_stutter) {
+      fail!(~"error: not in a stutter");
+    }
+    unsafe { 
+      if (rand() as c_double / (RAND_MAX as c_double) < p_of_end_stutter) {
+        self.in_stutter = false;
+        self.data.clear();
+        self.stutter_idx = 0;
+      }
+    }
+  }
+
+  fn get_next_sample(&mut self, sample : f32) -> f32 {
+    let stutter_win_size : uint = 800;
+    let mut stutter_sample : f32 = 0.0;
+
+    //normal playback
+    if (!self.in_stutter) {
+      self.begin_stutter_pred();
+      return sample;
+    }
+    
+    self.end_stutter_pred(); 
+
+    //in stutter...
+    //window is full, begin to repeat
+    if (self.data.len() == stutter_win_size) {
+      self.stutter_idx = self.stutter_idx % (stutter_win_size as int);
+      io::println(fmt!("stutter idx: %i", self.stutter_idx));
+      stutter_sample = self.data[self.stutter_idx];
+      self.stutter_idx = self.stutter_idx + 1;
+      //maybe wrap around
+      return stutter_sample;
+    }
+    //fill up window
+    self.data.push(sample); 
+    self.stutter_idx = self.stutter_idx + 1;
+    sample
+  }
+
+  fn begin_stutter_pred(&mut self) -> () {
+    let p_of_start_stutter : c_double = 0.00001;
+    if (self.in_stutter) {
+      fail!(~"error: already in a stutter");
+    } 
+    unsafe { 
+      if (rand() as c_double / (RAND_MAX as c_double) < p_of_start_stutter) {
+        self.in_stutter = true;
+        self.stutter_idx = 0;
+      }
+    }
+  }
+}
+
 fn main() -> () {
   unsafe { 
     do str::as_c_str(~"Rusty Jack") |client_name| {
@@ -457,40 +520,15 @@ fn main() -> () {
       do str::as_c_str(~"/tmp/rusty-jack-in") |pipe_path| {
         let pipe = open( pipe_path, (O_RDONLY | 0x0004) as i32, (S_IWUSR | S_IRUSR ) as i32);
         let mut method = Clean; 
-        let mut in_stutter = false;
-
+        let mut stutter_buffer = StutterBuffer { stutter_idx: 0, data: ~[], in_stutter : false };
         let cb3 = |bytes: *c_void, bytes_size: i64| {
-          let mut stutter_sample : f32 = 0.0;
           let mut curr_ptr : *mut c_void  = bytes as *mut c_void;
           let mut bytes_processed : u64 = 0;
-          let mut previous_sample: f32 = 0.0;
           let mut next_sample : f32 =  0.0;
-          let p_of_start_stutter : c_double = 0.0001;
-          let p_of_end_stutter : c_double = 0.00001;
 
           while (bytes_processed < bytes_size as u64) {
-            if (in_stutter) {
-              io::println(~"in stutter");
-              if (rand() as c_double / (RAND_MAX as c_double) < p_of_end_stutter) {
-                in_stutter = false;
-                next_sample = *(curr_ptr as *f32);
-              } else {
-                next_sample = stutter_sample;
-              }
-            } else {
-              io::println(~"normal");
-              //can't stutter on first sample
-              if (bytes_processed == 0) {
-                next_sample = *(curr_ptr as *f32);
-              } else {
-                //begin stutter?
-                if (rand() as c_double / (RAND_MAX as c_double) < p_of_start_stutter) {
-                  in_stutter = true;
-                  stutter_sample = *(curr_ptr as *f32);
-                } 
-                next_sample = *(curr_ptr as *f32);
-              }
-            } 
+            next_sample = *(curr_ptr as *f32);
+            next_sample = stutter_buffer.get_next_sample( next_sample );
 
             if (next_sample > 1.0) {
               next_sample = 1.0;
