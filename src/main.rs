@@ -124,11 +124,6 @@ enum JackPortFlags {
   JackPortIsTerminal = 0x10
 }
 
-enum PlayMethod { 
-  Clean, 
-  BitReduce,
-  Stutter
-}
 
 #[link_args = "-ljack"]
 extern {
@@ -333,12 +328,10 @@ fn read_from_fifo_clean(rb : *JackRingBuffer, pipe: c_int, cb: &fn(*c_void, i64)
       }
     
       let mut curr_ptr : *mut c_void  = read_buffer as *mut c_void;
-      //let chicken = vec::raw::from_buf_raw::<u8>(read_buffer as *u8, bytes_available_from_pipe as uint);
-      //do vec::as_mut_buf(chicken)  |v,size| {
-      //  io::println(fmt!("tuna: %?, size: %?", v, size));
 
-      //}
+
       let (processed_bytes, processed_bytes_size) = cb(read_buffer, bytes_available_from_pipe);
+
       bytes_written = bytes_written + processed_bytes_size;
 
       let write_result = jack_ringbuffer_write(rb, processed_bytes as *char, processed_bytes_size);
@@ -400,13 +393,67 @@ fn read_from_fifo(rb : *JackRingBuffer, pipe: c_int) -> () {
 }
 
 
-struct StutterBuffer {
-  pub stutter_idx : int,
-  pub data : ~[f32],
-  pub in_stutter: bool
+trait Playable {
+  fn get_next_sample( &mut self, sample : f32 ) -> f32;
 }
 
-impl StutterBuffer {
+struct CleanCog;
+
+impl Playable for CleanCog {
+  fn get_next_sample(&mut self, sample : f32) -> f32 {
+    sample
+  }
+}
+
+struct DirtyCog;
+
+impl Playable for DirtyCog {
+  fn get_next_sample(&mut self, sample : f32) -> f32 {
+    let int_sample_ptr : *u32 = (ptr::addr_of(&sample) as *u32);
+    unsafe { 
+      let int_sample = (*int_sample_ptr) & 0b1_01111100_11111111111111111111111;
+      return *(ptr::addr_of(&int_sample) as *f32);
+    }
+  }
+}
+
+struct StutterCog {
+  pub stutter_idx : int,
+  pub data : ~[f32],
+  pub in_stutter: bool,
+  pub stutter_win_size: int
+}
+
+
+impl Playable for StutterCog {
+  fn get_next_sample(&mut self, sample : f32) -> f32 {
+    let mut stutter_sample : f32 = 0.0;
+
+    //normal playback
+    if (!self.in_stutter) {
+      self.begin_stutter_pred();
+      return sample;
+    }
+    
+    self.end_stutter_pred(); 
+
+    //in stutter...
+    //window is full, begin to repeat
+    if (self.data.len() == self.stutter_win_size as uint) {
+      self.stutter_idx = self.stutter_idx % self.stutter_win_size;
+      stutter_sample = self.data[self.stutter_idx];
+      self.stutter_idx = self.stutter_idx + 1;
+      //maybe wrap around
+      return stutter_sample;
+    }
+    //fill up window
+    self.data.push(sample); 
+    self.stutter_idx = self.stutter_idx + 1;
+    sample
+  }
+}
+
+impl StutterCog {
   fn end_stutter_pred(&mut self) -> () {
     let p_of_end_stutter : c_double = 0.0001;
     if (!self.in_stutter) {
@@ -421,36 +468,10 @@ impl StutterBuffer {
     }
   }
 
-  fn get_next_sample(&mut self, sample : f32) -> f32 {
-    let stutter_win_size : uint = 800;
-    let mut stutter_sample : f32 = 0.0;
-
-    //normal playback
-    if (!self.in_stutter) {
-      self.begin_stutter_pred();
-      return sample;
-    }
-    
-    self.end_stutter_pred(); 
-
-    //in stutter...
-    //window is full, begin to repeat
-    if (self.data.len() == stutter_win_size) {
-      self.stutter_idx = self.stutter_idx % (stutter_win_size as int);
-      io::println(fmt!("stutter idx: %i", self.stutter_idx));
-      stutter_sample = self.data[self.stutter_idx];
-      self.stutter_idx = self.stutter_idx + 1;
-      //maybe wrap around
-      return stutter_sample;
-    }
-    //fill up window
-    self.data.push(sample); 
-    self.stutter_idx = self.stutter_idx + 1;
-    sample
-  }
 
   fn begin_stutter_pred(&mut self) -> () {
     let p_of_start_stutter : c_double = 0.00001;
+
     if (self.in_stutter) {
       fail!(~"error: already in a stutter");
     } 
@@ -519,8 +540,8 @@ fn main() -> () {
 
       do str::as_c_str(~"/tmp/rusty-jack-in") |pipe_path| {
         let pipe = open( pipe_path, (O_RDONLY | 0x0004) as i32, (S_IWUSR | S_IRUSR ) as i32);
-        let mut method = Clean; 
-        let mut stutter_buffer = StutterBuffer { stutter_idx: 0, data: ~[], in_stutter : false };
+        let mut current_cog : @Playable = @CleanCog as @Playable; 
+
         let cb3 = |bytes: *c_void, bytes_size: i64| {
           let mut curr_ptr : *mut c_void  = bytes as *mut c_void;
           let mut bytes_processed : u64 = 0;
@@ -528,48 +549,12 @@ fn main() -> () {
 
           while (bytes_processed < bytes_size as u64) {
             next_sample = *(curr_ptr as *f32);
-            next_sample = stutter_buffer.get_next_sample( next_sample );
-
+            next_sample = current_cog.get_next_sample( next_sample );
             if (next_sample > 1.0) {
               next_sample = 1.0;
             } else if (next_sample < -1.0) {
               next_sample = -1.0;
             } 
-            memcpy( curr_ptr as *c_void, (core::ptr::addr_of(&next_sample) as *c_void), sys::size_of::<JackDefaultAudioSample>() as u64);
-            curr_ptr = (curr_ptr as uint + 4) as *mut c_void;
-            bytes_processed = bytes_processed + 4;
-          }
-          (bytes, bytes_processed)
-        };
-
-        let cb2 = |bytes: *c_void, bytes_size: i64| {
-          let mut curr_ptr : *mut c_void  = bytes as *mut c_void;
-          let mut bytes_processed : u64 = 0;
-
-          while (bytes_processed < bytes_size as u64) {
-            let mut next_sample_int : u32= *(curr_ptr as *u32);
-            next_sample_int = next_sample_int & 0b1_01111100_11111111111111111111111;
-
-            memcpy( curr_ptr as *c_void, (core::ptr::addr_of(&next_sample_int) as *c_void), sys::size_of::<JackDefaultAudioSample>() as u64);
-            curr_ptr = (curr_ptr as uint + 4) as *mut c_void;
-            bytes_processed = bytes_processed + 4;
-          }
-          (bytes, bytes_processed)
-        };
-
-
-        let cb1 = |bytes: *c_void, bytes_size: i64| {
-          let mut curr_ptr : *mut c_void  = bytes as *mut c_void;
-          let mut bytes_processed : u64 = 0;
-
-          while (bytes_processed < bytes_size as u64) {
-            let mut next_sample : f32 = *(curr_ptr as *f32);
-            if (next_sample > 1.0) {
-              next_sample = 1.0;
-            } else if (next_sample < -1.0) {
-              next_sample = -1.0;
-            } 
-
             memcpy( curr_ptr as *c_void, (core::ptr::addr_of(&next_sample) as *c_void), sys::size_of::<JackDefaultAudioSample>() as u64);
             curr_ptr = (curr_ptr as uint + 4) as *mut c_void;
             bytes_processed = bytes_processed + 4;
@@ -578,11 +563,8 @@ fn main() -> () {
         };
 
         loop {
-          match method {
-            Clean     =>   { read_from_fifo_clean(rb, pipe, cb1) },   
-            BitReduce =>   { read_from_fifo_clean(rb, pipe, cb2)  },
-            Stutter   =>   { read_from_fifo_clean(rb, pipe, cb3)  }
-          };
+          read_from_fifo_clean(rb, pipe, cb3 );
+
           fifo_cmd_port.recv();
           if (std_in_port.peek()) {
             match std_in_port.recv() {
@@ -592,9 +574,9 @@ fn main() -> () {
                 break;
               }
 
-              ~"0" => { method = Clean;}
-              ~"1" => { method = BitReduce;}
-              ~"2" => { method = Stutter;}
+              ~"0" => { current_cog = @CleanCog as @Playable;}
+              ~"1" => { current_cog = @DirtyCog as @Playable;}
+              ~"2" => { current_cog = @StutterCog { stutter_idx: 0, data: ~[], in_stutter : false, stutter_win_size : 1500 } as @Playable;}
               _ => {}
             }
           }
