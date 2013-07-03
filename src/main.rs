@@ -542,7 +542,7 @@ fn main() -> () {
         let pipe = open( pipe_path, (O_RDONLY | 0x0004) as i32, (S_IWUSR | S_IRUSR ) as i32);
         let mut current_cog : @Playable = @CleanCog as @Playable; 
 
-        let cb3 = |bytes: *c_void, bytes_size: i64| {
+        let cb = |bytes: *c_void, bytes_size: i64| {
           let mut curr_ptr : *mut c_void  = bytes as *mut c_void;
           let mut bytes_processed : u64 = 0;
           let mut next_sample : f32 =  0.0;
@@ -563,7 +563,7 @@ fn main() -> () {
         };
 
         loop {
-          read_from_fifo_clean(rb, pipe, cb3 );
+          read_from_fifo_clean(rb, pipe, cb );
 
           fifo_cmd_port.recv();
           if (std_in_port.peek()) {
