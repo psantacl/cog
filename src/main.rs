@@ -253,12 +253,6 @@ extern fn process_ring_buffer( frames: JackNFrames, args: *c_void ) -> c_int {
 
 
     if (bytes_available < total_bytes_requested) {
-      //do str::as_c_str(fmt!("Silence: %d", (total_bytes_requested as int - bytes_available as int) )) |c_str| {
-      //  puts( c_str as *c_char );
-      //}
-      //do str::as_c_str(fmt!("Silence: %?", total_bytes_requested - bytes_available)) |c_str| {
-      //  puts( c_str as *c_char );
-      //}
       let buffer_ptr = buffer as uint + offset;
       memset( buffer_ptr as *c_void, 0, (total_bytes_requested - bytes_available) );
     }
@@ -329,68 +323,16 @@ fn read_from_fifo_clean(rb : *JackRingBuffer, pipe: c_int, cb: &fn(*c_void, i64)
     
       let mut curr_ptr : *mut c_void  = read_buffer as *mut c_void;
 
-
       let (processed_bytes, processed_bytes_size) = cb(read_buffer, bytes_available_from_pipe);
 
       bytes_written = bytes_written + processed_bytes_size;
 
       let write_result = jack_ringbuffer_write(rb, processed_bytes as *char, processed_bytes_size);
       free(read_buffer);
-
-      //while (bytes_available_from_pipe > 0) {
-      //  let mut next_sample : f32 =  *(curr_ptr as  *f32); 
-
-      //  curr_ptr = (curr_ptr as uint + 4) as *mut c_void;
-      //  bytes_available_from_pipe = bytes_available_from_pipe - 4;
-
-      //  next_sample = cb(next_sample);
-      //  bytes_written = bytes_written + 4;
-      //  let write_result = jack_ringbuffer_write(rb, ptr::addr_of(&next_sample) as *char, 4);
-      //}
-      //free(read_buffer);
     }
   }
 }
 
-
-fn read_from_fifo(rb : *JackRingBuffer, pipe: c_int) -> () {
-  unsafe {
-    let write_space = jack_ringbuffer_write_space(rb);
-    if (write_space == 0) {
-      return;
-    }
-    let mut read_buffer = malloc( write_space );
-    let bytes_read = read( pipe, read_buffer as *mut c_void, write_space); 
-
-    let curr_ptr : *mut c_void  = read_buffer as *mut c_void;
-
-    for uint::range(0, bytes_read/4 as uint) |i| {
-      let mut next_sample : f32 =  *((curr_ptr as uint + 4 * i) as *f32); 
-      let mut next_sample_int : u16=  *((curr_ptr as uint + 4 * i) as *u16); 
-      io::println(fmt!("before:\t%?", next_sample ));
-      if (next_sample > 1.0 || next_sample < -1.0) {
-        next_sample = 0.0;
-      }
-      let write_result = jack_ringbuffer_write(rb, ptr::addr_of(&next_sample) as *char, 4);
-
-      //let tuna : i16 = (next_sample_int as i32 - 32768) as i1io6;
-      //next_sample = tuna as f32 / 32768.0 as f32; 
-      //let chicken = ptr::addr_of(&next_sample); 
-
-      //io::println(fmt!("after:\t%?", *(chicken as *f32)));
-      //let write_result = jack_ringbuffer_write(rb, chicken as *char, 4);
-
-      //clear exponents
-      //next_sample_int = next_sample_int & 0b1_01111111_11111111111111111111111; 
-      //let chicken = ptr::addr_of(&next_sample_int) as *c_void;
-      //io::println(fmt!("after:  %?", *(chicken as *f32)));
-      //let write_result = jack_ringbuffer_write(rb, chicken as *char, 4);
-
-    }
-    //let write_result = jack_ringbuffer_write(rb, read_buffer as *char, bytes_read  as u64);
-    free(read_buffer);
-  }
-}
 
 
 trait Playable {
