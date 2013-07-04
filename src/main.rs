@@ -409,8 +409,7 @@ impl StutterCog {
       }
     }
   }
-
-
+  
   fn begin_stutter_pred(&mut self) -> () {
     let p_of_start_stutter : c_double = 0.00001;
 
@@ -419,6 +418,10 @@ impl StutterCog {
     } 
     unsafe { 
       if (rand() as c_double / (RAND_MAX as c_double) < p_of_start_stutter) {
+        let r = core::rand::Rng();
+        //-0.5..0.5
+        let stutter_win_delta =  core::rand::Rand::rand::<float>(r) - 0.5;
+        self.stutter_win_size = self.stutter_win_size + ((self.stutter_win_size as float) * stutter_win_delta) as int;
         self.in_stutter = true;
         self.stutter_idx = 0;
       }
