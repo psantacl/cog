@@ -247,7 +247,7 @@ impl StutterCog {
 
 fn main() -> () {
   unsafe { 
-    do str::as_c_str(~"Rusty Jack") |client_name| {
+    do str::as_c_str(~"Cog") |client_name| {
       let options = 0 as c_int;
       let mut status = BoxedJackStatus { val: 0, errors: ~[] };
 
@@ -299,7 +299,7 @@ fn main() -> () {
 
       //list_ports(client);
 
-      do str::as_c_str(~"/tmp/rusty-jack-in") |pipe_path| {
+      do str::as_c_str(~"/tmp/cog-in") |pipe_path| {
         let pipe = open( pipe_path, (O_RDONLY | 0x0004) as i32, (S_IWUSR | S_IRUSR ) as i32);
         let mut current_cog : @Playable = @CleanCog as @Playable; 
 
