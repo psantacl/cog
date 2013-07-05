@@ -12,7 +12,7 @@ Cog is an rust program which uses the Jack Audio Connection Kit to play sound.  
 Cog will connect to a runner Jack server.  You can use the JackPilot which comes with the Jack to connect the Cog application to whatever output you wish: Speakers, Logic Audio etc.
 
 Cog also creates a named fifo under /tmp/cog-in.  Any data you pipe through that fifo will be interpretted as audio data and played: `cat snd-files/the-sound-of-silence-f32.wav > /tmp/cog-in`
-Please note, there is nothing stopping you from non-audio data into this pipe as well: `dd if=/dev/urandom of=/tmp/cog-in bs=44100 count=100` 
+Note, there is nothing stopping you from sending non-audio data into this pipe as well: `dd if=/dev/urandom of=/tmp/cog-in bs=44100 count=100`
   
 ## Playback Algorithms
 Cog can optionally manipulate the data it receives prior to sending it to Jack.  Descriptions of some of the algorithm are below:
