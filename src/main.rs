@@ -237,7 +237,9 @@ impl StutterCog {
         let r = core::rand::Rng();
         //-0.5..0.5
         let stutter_win_delta =  core::rand::Rand::rand::<float>(r) - 0.5;
+
         self.stutter_win_size = self.stutter_win_size + ((self.stutter_win_size as float) * stutter_win_delta) as int;
+
         self.in_stutter = true;
         self.stutter_idx = 0;
       }
@@ -337,7 +339,7 @@ fn main() -> () {
 
               ~"0" => { current_cog = @CleanCog as @Playable;}
               ~"1" => { current_cog = @DirtyCog as @Playable;}
-              ~"2" => { current_cog = @StutterCog { stutter_idx: 0, data: ~[], in_stutter : false, stutter_win_size : 1500 } as @Playable;}
+              ~"2" => { current_cog = @StutterCog { stutter_idx: 0, data: ~[], in_stutter : false, stutter_win_size : 2000 } as @Playable;}
               _ => {}
             }
           }
