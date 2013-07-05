@@ -240,6 +240,10 @@ impl StutterCog {
 
         self.stutter_win_size = self.stutter_win_size + ((self.stutter_win_size as float) * stutter_win_delta) as int;
 
+        //less than 100 samples is not particularly musical
+        if (self.stutter_win_size < 100) {
+          self.stutter_win_size = 100;
+        }
         self.in_stutter = true;
         self.stutter_idx = 0;
       }
