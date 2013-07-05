@@ -3,8 +3,8 @@
 Cog is an example program written in rust of using the Jack Audio Connection Kit to play sound.  It relies on the crate rusty-jack(https://github.com/psantacl/rusty-jack) for its interop with Jack.
 
 ## Building
-1. Install the Jack Audio Connection Kit server: http://jackaudio.org/download
-2. Clone the rusty-jack crate( https://github.com/psantacl/rusty-jack) and build with make.
+1. [Install](http://jackaudio.org/download) the Jack Audio Connection Kit server
+2. Clone the [rusty-jack](https://github.com/psantacl/rusty-jack) create and build with `make`.
 3. Copy the crate's build artifact (librusty_jack*dylib*) into the cog's libs directory
 4. `make && ./bin/cog` 
 
