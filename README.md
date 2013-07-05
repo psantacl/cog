@@ -4,7 +4,7 @@ Cog is an rust program which uses the Jack Audio Connection Kit to play sound.  
 
 ## Building
 1. [Install](http://jackaudio.org/download) the Jack Audio Connection Kit server
-2. Clone the [rusty-jack](https://github.com/psantacl/rusty-jack) create and build with `make`.
+2. Clone the [rusty-jack](https://github.com/psantacl/rusty-jack) create and build with `make`
 3. Copy the crate's build artifact (librusty_jack*dylib*) into the cog's libs directory
 4. `make && ./bin/cog` 
 
@@ -12,10 +12,10 @@ Cog is an rust program which uses the Jack Audio Connection Kit to play sound.  
 Cog will connect to a runner Jack server.  You can use the JackPilot which comes with the Jack to connect the Cog application to whatever output you wish: Speakers, Logic Audio etc.
 
 Cog also creates a named fifo under /tmp/cog-in.  Any data you pipe through that fifo will be interpretted as audio data and played: `cat snd-files/the-sound-of-silence-f32.wav > /tmp/cog-in`
-
+Please note, there is nothing stopping you from non-audio data into this pipe as well: `dd if=/dev/urandom of=/tmp/cog-in bs=44100 count=100` 
   
 ## Playback Algorithms
-Cog can optionally manipulate the data it receives prior to sending to Jack.  Descriptions of some of the algorithm are below:
-  * Clean: Interpret all data as 32 bit floats.  Any samples outside of the audio range(-1.0 ... 1.0) will be brought into the accept range.
+Cog can optionally manipulate the data it receives prior to sending it to Jack.  Descriptions of some of the algorithm are below:
+  * Clean: Interpret all data as 32 bit floats.  Any samples outside of the audio range(-1.0 ... 1.0) will be brought into the aforemention range.
   * Bit Reduce:  Interpret all data as 32 bit floats and then bit reduce them by XOR the mantissa.  The result is distortion.
   * Stutter: Emulate CD skipping by probabilistically stuttering the output.
