@@ -1,2 +1,2 @@
-bin/chicken*
-src/chicken*
+bin/*
+libs/*
