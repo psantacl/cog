@@ -1,6 +1,6 @@
 # Cog
 
-Cog is an example program written in rust of using the Jack Audio Connection Kit to play sound.  It relies on the crate rusty-jack(https://github.com/psantacl/rusty-jack) for its interop with Jack.
+Cog is an rust program which uses the Jack Audio Connection Kit to play sound.  It relies on the crate rusty-jack(https://github.com/psantacl/rusty-jack) for its interop with Jack.
 
 ## Building
 1. [Install](http://jackaudio.org/download) the Jack Audio Connection Kit server
